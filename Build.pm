@@ -682,8 +682,9 @@ sub readdeps {
   my ($config, $pkginfo, @depfiles) = @_;
 
   print STDERR "readdeps:somebody is calling me...\n\n";
-	  my $trace = Devel::StackTrace->new;
-	  print STDERR $trace->as_string;
+  my $trace = Devel::StackTrace->new;
+  print STDERR $trace->as_string;
+  print STDERR "depfiles: @depfiles\n";
 
   my %requires;
   my %recommends;
@@ -693,8 +694,12 @@ sub readdeps {
   my %pkgobsoletes;
   my $dofileprovides = %{$config->{'fileprovides'} || {}};
   for my $depfile (@depfiles) {
+    print STDERR "Wow... $depfile\n";
     if (ref($depfile) eq 'HASH') {
       for my $rr (keys %$depfile) {
+	if ($rr =~ /rpmdeps/) {
+	  print STDERR "Gotcha. $rr : ".Dumper($depfile->{$rr}->{'recommends'})."\n";
+	}
 	$provides{$rr} = $depfile->{$rr}->{'provides'};
 	$requires{$rr} = $depfile->{$rr}->{'requires'};
 	$recommends{$rr} = $depfile->{$rr}->{'recommends'};
@@ -741,7 +746,7 @@ sub readdeps {
       }
       my %ss;
       @ss = grep {!$ss{$_}++} @ss;
-      if ($s =~ /^(P|R|C|O):(.*)\.(.*)-\d+\/\d+\/\d+:$/) {
+      if ($s =~ /^(P|R|C|O|r):(.*)\.(.*)-\d+\/\d+\/\d+:$/) {
 	my $pkgid = $2;
 	my $arch = $3;
 	if ($1 eq "P") {
@@ -986,6 +991,12 @@ sub expand {
   my $whatprovides = $config->{'whatprovidesh'};
   my $requires = $config->{'requiresh'};
   my $recommends = $config->{'recommendsh'};
+  print STDERR "\n\n***Entering expand...\nReq from rpmdeps";
+  my $trace = Devel::StackTrace->new;
+  print STDERR $trace->as_string;
+  print STDERR Dumper($requires->{'rpmdeps'});
+  print STDERR "\nRecommends from rpmdeps";
+  print STDERR Dumper($recommends->{'rpmdeps'});
 
   my %xignore = map {substr($_, 1) => 1} grep {/^-/} @p;
   $ignore = {} if $xignore{'-ignoreignore--'};
@@ -1108,45 +1119,37 @@ sub expand {
 		last;
 	    }
 	}
+	if (@q > 1 && @{$recommends->{$p} || []} > 0) {
+	  print STDERR "Resolving $p->$r with @{$recommends->{$p}}\n";
+	  my @recommendedq;
+	  my $i;
+
+	  for my $iq (@q) {
+	    for my $rpkg (@{$recommends->{$p}}) {
+	      if ($rpkg =~ /$iq/) {
+	        push @recommendedq, $iq;
+	      }
+	    }
+	  }
+	  if (@recommendedq > 0) {
+	    @q = @recommendedq;
+	    print STDERR "Recommended @q.\n";
+	  }
+	}
 	if (@q > 1) {
 	  my $trace = Devel::StackTrace->new;
 	  print STDERR $trace->as_string;
-	  print STDERR "Owner : [$p]\n";
-	  print STDERR "To Resolve : [$r]\n";
-	  print STDERR "Candidates w/ Rec: |". (@{$recommends->{$r} || []}). "|\n";
 	  print STDERR "\n======================\n";
-	  print STDERR Dumper($recommends->{$r});
-	  print STDERR "===================\n\n";
-	  print STDERR Dumper($resolve_choice);
-	  print STDERR "|@{$recommends->{$p}}|\n";
-	  print STDERR "|@{$requires->{$p}}|\n";
-	  if ($resolve_choice->{'first'} || $prefer->{'__anything_first__'}) {
-	    @q = ($q[0]);
-	  } elsif ($resolve_choice->{'lexical_first'} || $prefer->{'__anything_lexical_first__'}) {
-	    @q = sort @q;
-	    @q = ($q[0]);
-	  } elsif ($resolve_choice->{'lexical_last'} || $prefer->{'__aynthing_lexical_last__'}) {
-	    @q = sort @q;
-	    @q = ($q[@q-1]);
-	  } elsif ($resolve_choice->{'last'} || $prefer->{'__anything_last__'}) {
-	    @q = ($q[@q-1]);
-	  } elsif ($resolve_choice->{'pattern.*'} || $prefer->{'__anything_pattern.*__'}) {
-	    # TODO: Find with regex.
-	  } elsif ($resolve_choice->{'recommends'}) {
-	  } elsif ($resolve_choice->{'suggests'}) {
-	    # recommends or suggests.
+	  my @arr = @{$recommends->{$p} || [$p]};
+	  print STDERR "q = @q / arr = @arr \n";
+	  print STDERR Dumper($recommends->{$p});
+	  if ($r ne $p) {
+	    push @error, "have choice for damn $r needed by $p: @q";
 	  } else {
-	    my @arr = @{$recommends->{$p} || [$p]};
-	    print STDERR "q = @q / arr = @arr \n";
-	    print STDERR Dumper($recommends->{$p});
-	    if ($r ne $p) {
-	      push @error, "have choice for damn $r needed by $p: @q";
-	    } else {
-	      push @error, "have choice for damn $r: @q";
-	    }
-	    push @pamb, $p unless @pamb && $pamb[-1] eq $p;
-	    next;
-	    }
+	    push @error, "have choice for damn $r: @q";
+	  }
+	  push @pamb, $p unless @pamb && $pamb[-1] eq $p;
+	  next;
 	}
 	push @p, $q[0];
 	print "added $q[0] because of $p:$r\n" if $expand_dbg;
@@ -1186,6 +1189,7 @@ sub order {
   my $requires = $config->{'requiresh'};
   my $recommends = $config->{'recommendsh'};
   my $whatprovides = $config->{'whatprovidesh'};
+  print STDERR "\n\n**** Entering at order... \n\n";
   my %deps;
   my %rdeps;
   my %needed;
@@ -1282,6 +1286,8 @@ sub add_all_providers {
   my ($config, @p) = @_;
   my $whatprovides = $config->{'whatprovidesh'};
   my $requires = $config->{'requiresh'};
+  my $recommends = $config->{'recommendsh'};
+  print STDERR "\n\n**** Entering at add_all_providers... \n\n";
   my %a;
   for my $p (@p) {
     for my $r (@{$requires->{$p} || [$p]}) {

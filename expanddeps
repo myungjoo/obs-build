@@ -128,6 +128,8 @@ my %ids;
 
 my %packs_arch;
 my %packs_done;
+
+print STDERR "Opening $rpmdeps\n";
 open(F, '<', $rpmdeps) || die("$rpmdeps: $!\n");
 # WARNING: the following code assumes that the 'I' tag comes last
 my ($pkgF, $pkgP, $pkgR, $pkgr, $pkgC, $pkgO);
@@ -141,6 +143,8 @@ if ($binarytype && $binarytype eq 'deb') {
   }
 }
 
+print STDERR "WTF... #A02 \n";
+my $prtplz = 0;
 while(<F>) {
   chomp;
   if (/^F:(.*?)-\d+\/\d+\/\d+: (.*)$/) {
@@ -151,6 +155,8 @@ while(<F>) {
     $pkgR = $2;
   } elsif (/^r:(.*?)-\d+\/\d+\/\d+: (.*)$/) {
     $pkgr = $2;
+    print STDERR "$_\n";
+    $prtplz = 1;
   } elsif (/^C:(.*?)-\d+\/\d+\/\d+: (.*)$/) {
     $pkgC = $2;
   } elsif (/^O:(.*?)-\d+\/\d+\/\d+: (.*)$/) {
@@ -158,6 +164,10 @@ while(<F>) {
   } elsif (/^I:(.*?)-\d+\/\d+\/\d+: (.*)$/) {
     next if $packs_done{$1};
     my ($i, $newid) = ($1, $2);
+    if ($prtplz > 0) {
+      print STDERR "$_\n";
+      $prtplz = $prtplz - 1;
+    }
     undef $i unless !$ids{$i} || $verscmp->($ids{$i}, $newid) < 0;
     undef $i unless defined($pkgF) && defined($pkgP);
     if (defined $i) {
@@ -178,10 +188,13 @@ while(<F>) {
     undef $pkgF;
     undef $pkgP;
     undef $pkgR;
+    undef $pkgr;
     undef $pkgC;
     undef $pkgO;
   } elsif ($_ eq 'D:') {
     %packs_done = %ids;
+  } else {
+    print STDERR "Unknown: $_\n";
   }
 }
 close F;
@@ -217,6 +230,7 @@ if (!defined($dist) || $dist eq '') {
   print STDERR "Warning: distribution not specified, assuming '$dist' (see $configdir).\n";
 }
 
+print STDERR "WTF... #A01 \n";
 $cf ||= Build::read_config_dist($dist, $archs[0], $configdir);
 $cf->{'warnings'} = 1;
 
@@ -267,6 +281,7 @@ for my $pack (keys %packs) {
       next;
     }
     push @rc, $s;
+    print STDERR "$pack recommends $s\n";
     while (@s && $s[0] =~ /^[\(<=>|]/) {
       $rc[-1] .= " $s[0] $s[1]";
       $rc[-1] =~ s/ \((.*)\)/ $1/;
@@ -360,6 +375,7 @@ my $subpacks = [];
 my $buildtype = '';
 my $extrasysdeps;
 
+print STDERR "WTF... #001 \n";
 if ($recipe) {
   my $d = Build::parse($cf, $recipe) || {};
   $buildtype = Build::recipe2buildtype($recipe) || '';
@@ -377,6 +393,7 @@ if ($recipe) {
   }
 }
 
+print STDERR "WTF... #002 \n";
 Build::readdeps($cf, undef, \%repo);
 
 #######################################################################
