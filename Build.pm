@@ -96,6 +96,7 @@ sub init_helper_hashes {
   my ($config) = @_;
 
   $config->{'preferh'} = { map {$_ => 1} @{$config->{'prefer'}} };
+  $config->{'resolve_choiceh'} = { map {$_ => 1} @{$config->{'resolve_choice'}} };
 
   my %ignore;
   for (@{$config->{'ignore'}}) {
@@ -225,6 +226,7 @@ sub read_config {
   $config->{'support'} = [];
   $config->{'keep'} = [];
   $config->{'prefer'} = [];
+  $config->{'resolve_choice'} = [];
   $config->{'ignore'} = [];
   $config->{'conflict'} = [];
   $config->{'substitute'} = {};
@@ -258,7 +260,7 @@ sub read_config {
       }
       next;
     }
-    if ($l0 eq 'preinstall:' || $l0 eq 'vminstall:' || $l0 eq 'required:' || $l0 eq 'support:' || $l0 eq 'keep:' || $l0 eq 'prefer:' || $l0 eq 'ignore:' || $l0 eq 'conflict:' || $l0 eq 'runscripts:' || $l0 eq 'expandflags:' || $l0 eq 'buildflags:') {
+    if ($l0 eq 'preinstall:' || $l0 eq 'vminstall:' || $l0 eq 'required:' || $l0 eq 'support:' || $l0 eq 'keep:' || $l0 eq 'prefer:' || $l0 eq 'resolve_choice:' || $l0 eq 'ignore:' || $l0 eq 'conflict:' || $l0 eq 'runscripts:' || $l0 eq 'expandflags:' || $l0 eq 'buildflags:') {
       my $t = substr($l0, 0, -1);
       for my $l (@l) {
 	if ($l eq '!*') {
@@ -679,7 +681,12 @@ sub get_cbinstalls { return (); }
 sub readdeps {
   my ($config, $pkginfo, @depfiles) = @_;
 
+  print STDERR "readdeps:somebody is calling me...\n\n";
+	  my $trace = Devel::StackTrace->new;
+	  print STDERR $trace->as_string;
+
   my %requires;
+  my %recommends;
   local *F;
   my %provides;
   my %pkgconflicts;
@@ -690,6 +697,7 @@ sub readdeps {
       for my $rr (keys %$depfile) {
 	$provides{$rr} = $depfile->{$rr}->{'provides'};
 	$requires{$rr} = $depfile->{$rr}->{'requires'};
+	$recommends{$rr} = $depfile->{$rr}->{'recommends'};
 	$pkgconflicts{$rr} = $depfile->{$rr}->{'conflicts'};
 	$pkgobsoletes{$rr} = $depfile->{$rr}->{'obsoletes'};
       }
@@ -749,6 +757,11 @@ sub readdeps {
 	  $pkginfo->{$pkgid}->{'requires'} = \@ss if $pkginfo;
 	  next;
 	}
+	if ($1 eq "r") {
+	  $recommends{$pkgid} = \@ss;
+	  $pkginfo->{$pkgid}->{'recommends'} = \@ss if $pkginfo;
+	  next;
+	}
 	if ($1 eq "C") {
 	  $pkgconflicts{$pkgid} = \@ss;
 	  $pkginfo->{$pkgid}->{'conflicts'} = \@ss if $pkginfo;
@@ -780,6 +793,7 @@ sub readdeps {
   }
   $config->{'providesh'} = \%provides;
   $config->{'requiresh'} = \%requires;
+  $config->{'recommendsh'} = \%recommends;
   $config->{'pkgconflictsh'} = \%pkgconflicts;
   $config->{'pkgobsoletesh'} = \%pkgobsoletes;
   makewhatprovidesh($config);
@@ -807,6 +821,7 @@ sub writedeps {
   print $fh "F:$id$url$pkg->{'location'}\n";
   print $fh "P:$id".join(' ', @{$pkg->{'provides'} || []})."\n";
   print $fh "R:$id".join(' ', @{$pkg->{'requires'}})."\n" if $pkg->{'requires'};
+  print $fh "r:$id".join(' ', @{$pkg->{'recommends'}})."\n" if $pkg->{'recommends'};
   print $fh "C:$id".join(' ', @{$pkg->{'conflicts'}})."\n" if $pkg->{'conflicts'};
   print $fh "O:$id".join(' ', @{$pkg->{'obsoletes'}})."\n" if $pkg->{'obsoletes'};
   print $fh "I:$id".getbuildid($pkg)."\n";
@@ -831,10 +846,11 @@ sub makewhatprovidesh {
 }
 
 sub setdeps {
-  my ($config, $provides, $whatprovides, $requires) = @_;
+  my ($config, $provides, $whatprovides, $requires, $recommends) = @_;
   $config->{'providesh'} = $provides;
   $config->{'whatprovidesh'} = $whatprovides;
   $config->{'requiresh'} = $requires;
+  $config->{'recommendsh'} = $recommends;
 }
 
 sub forgetdeps {
@@ -842,6 +858,7 @@ sub forgetdeps {
   delete $config->{'providesh'};
   delete $config->{'whatprovidesh'};
   delete $config->{'requiresh'};
+  delete $config->{'recommendsh'};
   delete $config->{'pkgconflictsh'};
   delete $config->{'pkgobsoletesh'};
 }
@@ -951,6 +968,9 @@ sub checkobsoletes {
   return 0;
 }
 
+use Data::Dumper;
+use Devel::StackTrace;
+
 sub expand {
   my ($config, @p) = @_;
 
@@ -958,12 +978,14 @@ sub expand {
   my $pkgconflicts = $config->{'pkgconflictsh'} || {};
   my $pkgobsoletes = $config->{'pkgobsoletesh'} || {};
   my $prefer = $config->{'preferh'};
+  my $resolve_choice = $config->{'resolve_choiceh'};
   my $ignore = $config->{'ignoreh'};
   my $ignoreconflicts = $config->{'expandflags:ignoreconflicts'};
   my $ignoreignore;
 
   my $whatprovides = $config->{'whatprovidesh'};
   my $requires = $config->{'requiresh'};
+  my $recommends = $config->{'recommendsh'};
 
   my %xignore = map {substr($_, 1) => 1} grep {/^-/} @p;
   $ignore = {} if $xignore{'-ignoreignore--'};
@@ -1087,13 +1109,44 @@ sub expand {
 	    }
 	}
 	if (@q > 1) {
-	  if ($r ne $p) {
-	    push @error, "have choice for $r needed by $p: @q";
+	  my $trace = Devel::StackTrace->new;
+	  print STDERR $trace->as_string;
+	  print STDERR "Owner : [$p]\n";
+	  print STDERR "To Resolve : [$r]\n";
+	  print STDERR "Candidates w/ Rec: |". (@{$recommends->{$r} || []}). "|\n";
+	  print STDERR "\n======================\n";
+	  print STDERR Dumper($recommends->{$r});
+	  print STDERR "===================\n\n";
+	  print STDERR Dumper($resolve_choice);
+	  print STDERR "|@{$recommends->{$p}}|\n";
+	  print STDERR "|@{$requires->{$p}}|\n";
+	  if ($resolve_choice->{'first'} || $prefer->{'__anything_first__'}) {
+	    @q = ($q[0]);
+	  } elsif ($resolve_choice->{'lexical_first'} || $prefer->{'__anything_lexical_first__'}) {
+	    @q = sort @q;
+	    @q = ($q[0]);
+	  } elsif ($resolve_choice->{'lexical_last'} || $prefer->{'__aynthing_lexical_last__'}) {
+	    @q = sort @q;
+	    @q = ($q[@q-1]);
+	  } elsif ($resolve_choice->{'last'} || $prefer->{'__anything_last__'}) {
+	    @q = ($q[@q-1]);
+	  } elsif ($resolve_choice->{'pattern.*'} || $prefer->{'__anything_pattern.*__'}) {
+	    # TODO: Find with regex.
+	  } elsif ($resolve_choice->{'recommends'}) {
+	  } elsif ($resolve_choice->{'suggests'}) {
+	    # recommends or suggests.
 	  } else {
-	    push @error, "have choice for $r: @q";
-	  }
-	  push @pamb, $p unless @pamb && $pamb[-1] eq $p;
-	  next;
+	    my @arr = @{$recommends->{$p} || [$p]};
+	    print STDERR "q = @q / arr = @arr \n";
+	    print STDERR Dumper($recommends->{$p});
+	    if ($r ne $p) {
+	      push @error, "have choice for damn $r needed by $p: @q";
+	    } else {
+	      push @error, "have choice for damn $r: @q";
+	    }
+	    push @pamb, $p unless @pamb && $pamb[-1] eq $p;
+	    next;
+	    }
 	}
 	push @p, $q[0];
 	print "added $q[0] because of $p:$r\n" if $expand_dbg;
@@ -1131,6 +1184,7 @@ sub order {
   my ($config, @p) = @_;
 
   my $requires = $config->{'requiresh'};
+  my $recommends = $config->{'recommendsh'};
   my $whatprovides = $config->{'whatprovidesh'};
   my %deps;
   my %rdeps;
