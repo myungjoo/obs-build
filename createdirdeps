@@ -34,7 +34,6 @@ Getopt::Long::Configure("no_ignore_case");
 my $oldfile;
 
 GetOptions ("oldfile=s" => \$oldfile) or exit(1);
-print STDERR "oldfile = $oldfile\n";
 
 sub queryfromfilename {
   my ($fn) = @_;
@@ -48,36 +47,23 @@ sub queryfromfilename {
 
 ######################################################################
 
-my $count = 0;
 my %old;
 if (defined($oldfile) && open(F, '<', $oldfile)) {
   while (<F>) {
     chomp;
     $old{$1} = $_ if /^([PRrCOI]:[^ ]+): /;
-    if ($_ =~ /^r:.*/) {
-      print STDERR "old found r: $_\n";
-    }
-    $count = $count + 1;
   }
   close F;
 }
-
-print STDERR "REUSING $count elements...\n";
 
 my %seen;
 
 for my $dir (@ARGV) {
   my $cmd = "find $dir -follow -type f \\( -name \"*.rpm\" -o -name \"*.deb\" -o -name \"*.pkg.tar.gz\" -o -name \"*.pkg.tar.xz\" \\) -a ! -name \"*src.rpm\" -printf '\%T@/\%s/\%i \%p\\n'";
-  print STDERR "opening $cmd\n";
   open(F, '-|', $cmd) or next;
   while (<F>) {
     chomp;
     next unless /^([\d\.]+\/\d+\/\d+) (.*)$/;
-    if ($_ =~ /^r:.*/) {
-      print STDERR "$_\n";
-    } elsif ($_ =~ /.*rpmdeps\..*/) {
-      print STDERR "$_\n";
-    }
     my $id = $1;
     my $path = $2;
     # newer find version add a fraction part to %T@, strip it
@@ -94,9 +80,6 @@ for my $dir (@ARGV) {
 	  print "F:$idx: $path\n";
 	  for (qw{P R r C O I}) {
 	    print $old{"$_:$idx"}."\n" if $old{"$_:$idx"};
-	    if ($idx =~ /.*rpmdeps.*/) {
-	      print STDERR "OLD INCUR $_:$idx\n";
-	    }
 	  }
 	  next;
 	}

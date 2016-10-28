@@ -488,19 +488,6 @@ reexpand:
       }
       next;
     }
-    if ($line =~ /^(?:Recommends\(pre\)|Recommends\(post\))\s*:\s*(\S.*)$/i) {
-      my $deps = $1;
-      my @deps = $deps =~ /([^\s\[,]+)(\s+[<=>]+\s+[^\s\[,]+)?(\s+\[[^\]]+\])?[\s,]*/g;
-      while (@deps) {
-	my ($pack, $vers, $qual) = splice(@deps, 0, 3);
-	if (!$unfilteredprereqs && $pack =~ /^\//) {
-	  $ifdeps = 1;
-	  next unless $config->{'fileprovides'}->{$pack};
-	}
-	#push @prereqs, $pack unless grep {$_ eq $pack} @prereqs;
-      }
-      next;
-    }
     if ($preamble && ($line =~ /^(BuildRequires|BuildPrereq|BuildConflicts|\#\!BuildIgnore|\#\!BuildConflicts)\s*:\s*(\S.*)$/i)) {
       my $what = $1;
       my $deps = $2;

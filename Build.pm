@@ -96,7 +96,6 @@ sub init_helper_hashes {
   my ($config) = @_;
 
   $config->{'preferh'} = { map {$_ => 1} @{$config->{'prefer'}} };
-  $config->{'resolve_choiceh'} = { map {$_ => 1} @{$config->{'resolve_choice'}} };
 
   my %ignore;
   for (@{$config->{'ignore'}}) {
@@ -226,7 +225,6 @@ sub read_config {
   $config->{'support'} = [];
   $config->{'keep'} = [];
   $config->{'prefer'} = [];
-  $config->{'resolve_choice'} = [];
   $config->{'ignore'} = [];
   $config->{'conflict'} = [];
   $config->{'substitute'} = {};
@@ -260,7 +258,7 @@ sub read_config {
       }
       next;
     }
-    if ($l0 eq 'preinstall:' || $l0 eq 'vminstall:' || $l0 eq 'required:' || $l0 eq 'support:' || $l0 eq 'keep:' || $l0 eq 'prefer:' || $l0 eq 'resolve_choice:' || $l0 eq 'ignore:' || $l0 eq 'conflict:' || $l0 eq 'runscripts:' || $l0 eq 'expandflags:' || $l0 eq 'buildflags:') {
+    if ($l0 eq 'preinstall:' || $l0 eq 'vminstall:' || $l0 eq 'required:' || $l0 eq 'support:' || $l0 eq 'keep:' || $l0 eq 'prefer:' || $l0 eq 'ignore:' || $l0 eq 'conflict:' || $l0 eq 'runscripts:' || $l0 eq 'expandflags:' || $l0 eq 'buildflags:') {
       my $t = substr($l0, 0, -1);
       for my $l (@l) {
 	if ($l eq '!*') {
@@ -680,12 +678,6 @@ sub get_cbinstalls { return (); }
 
 sub readdeps {
   my ($config, $pkginfo, @depfiles) = @_;
-
-  print STDERR "readdeps:somebody is calling me...\n\n";
-  my $trace = Devel::StackTrace->new;
-  print STDERR $trace->as_string;
-  print STDERR "depfiles: @depfiles\n";
-
   my %requires;
   my %recommends;
   local *F;
@@ -694,12 +686,8 @@ sub readdeps {
   my %pkgobsoletes;
   my $dofileprovides = %{$config->{'fileprovides'} || {}};
   for my $depfile (@depfiles) {
-    print STDERR "Wow... $depfile\n";
     if (ref($depfile) eq 'HASH') {
       for my $rr (keys %$depfile) {
-	if ($rr =~ /rpmdeps/) {
-	  print STDERR "Gotcha. $rr : ".Dumper($depfile->{$rr}->{'recommends'})."\n";
-	}
 	$provides{$rr} = $depfile->{$rr}->{'provides'};
 	$requires{$rr} = $depfile->{$rr}->{'requires'};
 	$recommends{$rr} = $depfile->{$rr}->{'recommends'};
@@ -851,11 +839,10 @@ sub makewhatprovidesh {
 }
 
 sub setdeps {
-  my ($config, $provides, $whatprovides, $requires, $recommends) = @_;
+  my ($config, $provides, $whatprovides, $requires) = @_;
   $config->{'providesh'} = $provides;
   $config->{'whatprovidesh'} = $whatprovides;
   $config->{'requiresh'} = $requires;
-  $config->{'recommendsh'} = $recommends;
 }
 
 sub forgetdeps {
@@ -973,9 +960,6 @@ sub checkobsoletes {
   return 0;
 }
 
-use Data::Dumper;
-use Devel::StackTrace;
-
 sub expand {
   my ($config, @p) = @_;
 
@@ -983,7 +967,6 @@ sub expand {
   my $pkgconflicts = $config->{'pkgconflictsh'} || {};
   my $pkgobsoletes = $config->{'pkgobsoletesh'} || {};
   my $prefer = $config->{'preferh'};
-  my $resolve_choice = $config->{'resolve_choiceh'};
   my $ignore = $config->{'ignoreh'};
   my $ignoreconflicts = $config->{'expandflags:ignoreconflicts'};
   my $ignoreignore;
@@ -991,12 +974,6 @@ sub expand {
   my $whatprovides = $config->{'whatprovidesh'};
   my $requires = $config->{'requiresh'};
   my $recommends = $config->{'recommendsh'};
-  print STDERR "\n\n***Entering expand...\nReq from rpmdeps";
-  my $trace = Devel::StackTrace->new;
-  print STDERR $trace->as_string;
-  print STDERR Dumper($requires->{'rpmdeps'});
-  print STDERR "\nRecommends from rpmdeps";
-  print STDERR Dumper($recommends->{'rpmdeps'});
 
   my %xignore = map {substr($_, 1) => 1} grep {/^-/} @p;
   $ignore = {} if $xignore{'-ignoreignore--'};
@@ -1120,7 +1097,6 @@ sub expand {
 	    }
 	}
 	if (@q > 1 && @{$recommends->{$p} || []} > 0) {
-	  print STDERR "Resolving $p->$r with @{$recommends->{$p}}\n";
 	  my @recommendedq;
 	  my $i;
 
@@ -1132,21 +1108,15 @@ sub expand {
 	    }
 	  }
 	  if (@recommendedq > 0) {
+        print "Recommended [@recommendedq] among [@q]\n" if $expand_dbg
 	    @q = @recommendedq;
-	    print STDERR "Recommended @q.\n";
 	  }
 	}
 	if (@q > 1) {
-	  my $trace = Devel::StackTrace->new;
-	  print STDERR $trace->as_string;
-	  print STDERR "\n======================\n";
-	  my @arr = @{$recommends->{$p} || [$p]};
-	  print STDERR "q = @q / arr = @arr \n";
-	  print STDERR Dumper($recommends->{$p});
 	  if ($r ne $p) {
-	    push @error, "have choice for damn $r needed by $p: @q";
+	    push @error, "have choice for $r needed by $p: @q";
 	  } else {
-	    push @error, "have choice for damn $r: @q";
+	    push @error, "have choice for $r: @q";
 	  }
 	  push @pamb, $p unless @pamb && $pamb[-1] eq $p;
 	  next;
@@ -1189,7 +1159,6 @@ sub order {
   my $requires = $config->{'requiresh'};
   my $recommends = $config->{'recommendsh'};
   my $whatprovides = $config->{'whatprovidesh'};
-  print STDERR "\n\n**** Entering at order... \n\n";
   my %deps;
   my %rdeps;
   my %needed;
@@ -1287,7 +1256,6 @@ sub add_all_providers {
   my $whatprovides = $config->{'whatprovidesh'};
   my $requires = $config->{'requiresh'};
   my $recommends = $config->{'recommendsh'};
-  print STDERR "\n\n**** Entering at add_all_providers... \n\n";
   my %a;
   for my $p (@p) {
     for my $r (@{$requires->{$p} || [$p]}) {
