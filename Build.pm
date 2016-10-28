@@ -1108,7 +1108,7 @@ sub expand {
 	    }
 	  }
 	  if (@recommendedq > 0) {
-        print "Recommended [@recommendedq] among [@q]\n" if $expand_dbg
+            print "recommended [@recommendedq] among [@q]\n" if $expand_dbg;
 	    @q = @recommendedq;
 	  }
 	}
